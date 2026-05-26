@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   Receipt,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,7 @@ const nav = [
   { href: "/stress", label: "Stress Engine", icon: AlertTriangle },
   { href: "/simulator", label: "Simulator", icon: Calculator },
   { href: "/forecast", label: "Forecast", icon: Activity },
+  { href: "/coach", label: "Coach", icon: Bot },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
