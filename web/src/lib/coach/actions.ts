@@ -21,8 +21,20 @@ type AnyAction =
 
 export function applyAction(raw: string): ActionRecord {
   let parsed: AnyAction;
+  // Strip optional code fences and leading/trailing prose around the JSON.
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  // Extract the first {...} substring (model sometimes adds prefixes).
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  const jsonText = firstBrace >= 0 && lastBrace > firstBrace
+    ? cleaned.slice(firstBrace, lastBrace + 1)
+    : cleaned;
   try {
-    parsed = JSON.parse(raw) as AnyAction;
+    parsed = JSON.parse(jsonText) as AnyAction;
   } catch {
     return { kind: "error", summary: "Could not parse action JSON", detail: raw.slice(0, 200) };
   }

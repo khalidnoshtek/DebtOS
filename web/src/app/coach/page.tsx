@@ -112,26 +112,22 @@ export default function CoachPage() {
           setStreamingText(stripActionTags(liveText));
         },
         onActions: (acts) => setPendingActions(acts),
-        onError: (msg) => {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `⚠️ ${msg}` },
-          ]);
-        },
       },
       controller.signal,
     );
 
     setStreamingText("");
     setStreaming(false);
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: result.assistantText || "(no response)",
-        actions: result.actions,
-      },
-    ]);
+
+    const finalMessage: ChatMessage = result.error
+      ? { role: "assistant", content: `⚠️ ${result.error}` }
+      : {
+          role: "assistant",
+          content: result.assistantText || "(empty response — try rephrasing)",
+          actions: result.actions,
+        };
+
+    setMessages((prev) => [...prev, finalMessage]);
   };
 
   if (!mounted) return null;
