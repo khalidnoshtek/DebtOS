@@ -56,8 +56,16 @@ export default function CoachPage() {
 
   useEffect(() => {
     setMounted(true);
-    setHasGPU(hasWebGPU());
-    isModelCached().then(setCached);
+    const gpu = hasWebGPU();
+    setHasGPU(gpu);
+    isModelCached().then((isCached) => {
+      setCached(isCached);
+      // If the model is already cached, auto-load it from IndexedDB so the
+      // user lands directly in the chat without clicking a button.
+      if (isCached && gpu) {
+        getEngine().catch(() => {});
+      }
+    });
     const unsub = subscribeStatus(setStatus);
     return () => {
       unsub();
@@ -152,8 +160,10 @@ export default function CoachPage() {
     );
   }
 
-  // Pre-load screen
-  if (!ready && messages.length === 0) {
+  // First-time pre-load screen — only when the model is NOT in the cache.
+  // If `cached` is null we're still checking; if true, we're auto-loading
+  // and the chat UI handles the brief loading state inline.
+  if (!ready && messages.length === 0 && cached === false) {
     return (
       <div className="mx-auto max-w-3xl">
         <PageHeader
@@ -373,9 +383,6 @@ function DownloadProgress({ status }: { status: EngineStatus }) {
         <span className="ml-auto tabular text-white/60">{pct}%</span>
       </div>
       <Progress value={pct} className="mt-2" barClassName="bg-gradient-to-r from-indigo-400 to-fuchsia-400" />
-      <p className="mt-2 text-[11px] text-white/40">
-        Downloading once. The browser caches the model — next time it loads instantly.
-      </p>
     </div>
   );
 }
