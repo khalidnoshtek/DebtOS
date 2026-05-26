@@ -10,6 +10,7 @@ export type ActionRecord = {
   kind: "add_emi" | "add_card" | "add_bill" | "update_profile" | "error";
   summary: string;
   detail?: string;
+  args?: Record<string, unknown>;
 };
 
 export type EngineStatus =

@@ -8,10 +8,15 @@ import {
   Sparkles,
   AlertCircle,
   Download,
-  CheckCircle2,
   Loader2,
   User as UserIcon,
   XCircle,
+  Paperclip,
+  FileSpreadsheet,
+  FileText,
+  ImageIcon,
+  Code as CodeIcon,
+  X,
 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,33 +31,47 @@ import {
   subscribeStatus,
 } from "@/lib/coach/engine";
 import { streamChat } from "@/lib/coach/chat";
-import { extractActions } from "@/lib/coach/actions";
-import type {
-  ActionRecord,
-  ChatMessage,
-  EngineStatus,
-} from "@/lib/coach/types";
+import { sanitizeStreamingText } from "@/lib/coach/actions";
+import {
+  attachmentsToPrompt,
+  extractFile,
+  type ExtractedFile,
+} from "@/lib/coach/file-extract";
+import type { ActionRecord, ChatMessage, EngineStatus } from "@/lib/coach/types";
+import { WorkingPill, ThinkingPill } from "@/components/coach/working-pill";
+import { ActionPill } from "@/components/coach/action-pill";
 
 const SUGGESTED_PROMPTS = [
   "I have a home loan with HDFC, 35 lakhs at 8.6% for 20 years, started 3 years ago",
   "Add rent of 35k due on the 5th",
   "My salary is 1.2L per month",
   "Which EMI should I close first to save the most interest?",
-  "What if I get a 2 lakh bonus, where should it go?",
 ];
+
+type ChatRow =
+  | { kind: "message"; message: ChatMessage }
+  | { kind: "attachments"; items: ExtractedFile[] };
+
+type StagedFile =
+  | { status: "extracting"; file: File; progress: string }
+  | { status: "ready"; data: ExtractedFile }
+  | { status: "error"; file: File; error: string };
 
 export default function CoachPage() {
   const [mounted, setMounted] = useState(false);
   const [hasGPU, setHasGPU] = useState<boolean | null>(null);
   const [cached, setCached] = useState<boolean | null>(null);
   const [status, setStatus] = useState<EngineStatus>(getStatus());
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [rows, setRows] = useState<ChatRow[]>([]);
   const [input, setInput] = useState("");
+  const [staged, setStaged] = useState<StagedFile[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [pendingActions, setPendingActions] = useState<ActionRecord[]>([]);
+  const [streamingWorking, setStreamingWorking] = useState(false);
+  const [streamingRawWindow, setStreamingRawWindow] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -60,11 +79,7 @@ export default function CoachPage() {
     setHasGPU(gpu);
     isModelCached().then((isCached) => {
       setCached(isCached);
-      // If the model is already cached, auto-load it from IndexedDB so the
-      // user lands directly in the chat without clicking a button.
-      if (isCached && gpu) {
-        getEngine().catch(() => {});
-      }
+      if (isCached && gpu) getEngine().catch(() => {});
     });
     const unsub = subscribeStatus(setStatus);
     return () => {
@@ -75,7 +90,7 @@ export default function CoachPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, streamingText]);
+  }, [rows, streamingText, streamingWorking]);
 
   const ready = status.state === "ready";
   const downloading = status.state === "downloading" || status.state === "checking";
@@ -83,48 +98,110 @@ export default function CoachPage() {
   const startEngine = async () => {
     try {
       await getEngine();
-    } catch {
-      // status will reflect error
+    } catch { /* error shown via status */ }
+  };
+
+  const onFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const arr = Array.from(files);
+    const startIdx = staged.length;
+    setStaged((prev) => [
+      ...prev,
+      ...arr.map<StagedFile>((f) => ({ status: "extracting", file: f, progress: "Reading…" })),
+    ]);
+    for (let i = 0; i < arr.length; i++) {
+      const file = arr[i];
+      try {
+        const data = await extractFile(file, (msg) => {
+          setStaged((prev) => {
+            const copy = [...prev];
+            const idx = startIdx + i;
+            if (copy[idx]?.status === "extracting") {
+              copy[idx] = { status: "extracting", file, progress: msg };
+            }
+            return copy;
+          });
+        });
+        setStaged((prev) => {
+          const copy = [...prev];
+          copy[startIdx + i] = { status: "ready", data };
+          return copy;
+        });
+      } catch (err) {
+        setStaged((prev) => {
+          const copy = [...prev];
+          copy[startIdx + i] = {
+            status: "error",
+            file,
+            error: err instanceof Error ? err.message : String(err),
+          };
+          return copy;
+        });
+      }
     }
   };
 
+  const removeStaged = (idx: number) =>
+    setStaged((prev) => prev.filter((_, i) => i !== idx));
+
   const handleSubmit = async (eOrText: FormEvent | string) => {
-    const text = typeof eOrText === "string" ? eOrText : input.trim();
+    const inputText = typeof eOrText === "string" ? eOrText : input.trim();
     if (typeof eOrText !== "string") {
       (eOrText as FormEvent).preventDefault();
     }
-    if (!text || streaming) return;
+
+    const readyAttachments = staged
+      .filter((s): s is Extract<StagedFile, { status: "ready" }> => s.status === "ready")
+      .map((s) => s.data);
+
+    if (!inputText && readyAttachments.length === 0) return;
+    if (streaming) return;
 
     if (!ready) {
       await startEngine();
       if (getStatus().state !== "ready") return;
     }
 
-    const userMessage: ChatMessage = { role: "user", content: text };
-    const newHistory = [...messages, userMessage];
-    setMessages(newHistory);
+    const promptBody = attachmentsToPrompt(readyAttachments) + (inputText || "Process the attached files: extract every entry (EMI, card, bill, profile field) and add it.");
+    const userMessage: ChatMessage = { role: "user", content: promptBody };
+
+    const newRows: ChatRow[] = [...rows];
+    if (readyAttachments.length) newRows.push({ kind: "attachments", items: readyAttachments });
+    newRows.push({ kind: "message", message: userMessage });
+    setRows(newRows);
     setInput("");
+    setStaged([]);
     setStreaming(true);
     setStreamingText("");
-    setPendingActions([]);
+    setStreamingWorking(false);
+    setStreamingRawWindow("");
+
+    const history = newRows
+      .filter((r): r is { kind: "message"; message: ChatMessage } => r.kind === "message")
+      .map((r) => r.message);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     let liveText = "";
     const result = await streamChat(
-      newHistory,
+      history,
       {
         onToken: (d) => {
           liveText += d;
-          setStreamingText(stripActionTags(liveText));
+          const { text, working } = sanitizeStreamingText(liveText);
+          setStreamingText(text);
+          setStreamingWorking(working);
+          if (working) setStreamingRawWindow(liveText.slice(-400));
         },
-        onActions: (acts) => setPendingActions(acts),
+        onActions: () => {},
       },
       controller.signal,
     );
 
     setStreamingText("");
+    setStreamingWorking(false);
+    setStreamingRawWindow("");
     setStreaming(false);
 
     const finalMessage: ChatMessage = result.error
@@ -135,12 +212,11 @@ export default function CoachPage() {
           actions: result.actions,
         };
 
-    setMessages((prev) => [...prev, finalMessage]);
+    setRows((prev) => [...prev, { kind: "message", message: finalMessage }]);
   };
 
   if (!mounted) return null;
 
-  // WebGPU not available
   if (hasGPU === false) {
     return (
       <div className="mx-auto max-w-3xl">
@@ -160,15 +236,12 @@ export default function CoachPage() {
     );
   }
 
-  // First-time pre-load screen — only when the model is NOT in the cache.
-  // If `cached` is null we're still checking; if true, we're auto-loading
-  // and the chat UI handles the brief loading state inline.
-  if (!ready && messages.length === 0 && cached === false) {
+  if (!ready && rows.length === 0 && cached === false) {
     return (
       <div className="mx-auto max-w-3xl">
         <PageHeader
           title="DebtOS Coach"
-          description="A private AI assistant that runs entirely in your browser. Helps you optimize debt and add EMIs, bills, and cards from plain text."
+          description="A private AI assistant that runs entirely in your browser. Helps you optimize debt and add EMIs, bills, and cards from plain text or files."
         />
 
         <Card>
@@ -179,7 +252,7 @@ export default function CoachPage() {
             <ul className="space-y-2">
               <li className="flex items-start gap-2">
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                <span>100% local — model weights download once (~1.6 GB) then run offline. Nothing leaves your device.</span>
+                <span>100% local — model downloads once (~1.6 GB), then runs offline. Nothing leaves your device.</span>
               </li>
               <li className="flex items-start gap-2">
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
@@ -187,7 +260,7 @@ export default function CoachPage() {
               </li>
               <li className="flex items-start gap-2">
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                <span>Chat naturally: <em>&ldquo;Add my HDFC home loan, 35L at 8.6% for 20 years&rdquo;</em> — Coach extracts the fields and adds the entry.</span>
+                <span>Drop in Excel, PDFs, images, or just type. Coach parses entries and adds them.</span>
               </li>
             </ul>
 
@@ -201,31 +274,13 @@ export default function CoachPage() {
               <div className="pt-2">
                 <Button onClick={startEngine}>
                   <Download className="h-4 w-4" />
-                  {cached ? "Load model" : `Download model (Llama-3.2-3B, ~1.6 GB)`}
+                  Download model (Llama-3.2-3B, ~1.6 GB)
                 </Button>
                 <p className="mt-2 text-xs text-white/40">
-                  First time only. After that it loads instantly on every visit.
+                  First time only. After that the page loads straight into chat.
                 </p>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card className="mt-4">
-          <CardHeader>
-            <CardTitle>What you can ask</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-              {SUGGESTED_PROMPTS.map((p) => (
-                <div
-                  key={p}
-                  className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-white/70"
-                >
-                  &ldquo;{p}&rdquo;
-                </div>
-              ))}
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -238,8 +293,8 @@ export default function CoachPage() {
         title="DebtOS Coach"
         description={ready ? `Running locally · ${DEFAULT_MODEL}` : "Loading model…"}
         action={
-          messages.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => setMessages([])}>
+          rows.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setRows([])}>
               <XCircle className="h-3.5 w-3.5" />
               Clear
             </Button>
@@ -250,10 +305,10 @@ export default function CoachPage() {
       {downloading && <DownloadProgress status={status} />}
 
       <div className="flex-1 space-y-3 overflow-y-auto pb-4">
-        {messages.length === 0 && ready && (
+        {rows.length === 0 && ready && (
           <div className="space-y-2 py-8 text-center">
             <Bot className="mx-auto h-8 w-8 text-white/30" />
-            <p className="text-sm text-white/50">Ask anything about your finances, or describe something to add.</p>
+            <p className="text-sm text-white/50">Ask anything, paste a table, or attach a file.</p>
             <div className="mx-auto mt-4 grid max-w-xl grid-cols-1 gap-2">
               {SUGGESTED_PROMPTS.slice(0, 3).map((p) => (
                 <button
@@ -269,42 +324,71 @@ export default function CoachPage() {
         )}
 
         <AnimatePresence initial={false}>
-          {messages.map((m, i) => (
-            <Bubble key={i} message={m} />
-          ))}
+          {rows.map((row, i) =>
+            row.kind === "message" ? (
+              <Bubble key={i} message={row.message} />
+            ) : (
+              <AttachmentsRow key={i} items={row.items} />
+            ),
+          )}
         </AnimatePresence>
 
         {streaming && (
-          <Bubble
-            message={{
-              role: "assistant",
-              content: streamingText || "…",
-            }}
-            streaming
+          <StreamingBubble
+            text={streamingText}
+            working={streamingWorking}
+            workingDetail={streamingRawWindow}
           />
-        )}
-
-        {pendingActions.length > 0 && streaming && (
-          <div className="space-y-1">
-            {pendingActions.map((a, i) => (
-              <ActionPill key={i} action={a} />
-            ))}
-          </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
       <form onSubmit={handleSubmit} className="sticky bottom-0 bg-zinc-950/40 pt-2 backdrop-blur-xl">
-        <div className="flex gap-2 rounded-2xl border border-white/10 bg-white/[0.02] p-2">
+        {staged.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {staged.map((s, i) => (
+              <StagedChip key={i} staged={s} onRemove={() => removeStaged(i)} />
+            ))}
+          </div>
+        )}
+        <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-white/[0.02] p-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!ready || streaming}
+            className="grid h-9 w-9 place-items-center rounded-lg text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-30"
+            title="Attach file (xlsx, pdf, image, csv, code, text)"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.json,.js,.ts,.tsx,.py,.html,.css"
+            onChange={(e) => {
+              onFilesSelected(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={ready ? "Ask anything, or describe a new EMI / bill / card…" : "Loading model…"}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e as unknown as FormEvent);
+              }
+            }}
+            placeholder={ready ? "Type, paste, or attach a file…" : "Loading model…"}
             disabled={!ready || streaming}
-            className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none"
+            rows={1}
+            className="flex-1 resize-none bg-transparent px-2 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none"
+            style={{ maxHeight: "120px" }}
           />
-          <Button type="submit" size="icon" disabled={!ready || streaming || !input.trim()}>
+          <Button type="submit" size="icon" disabled={!ready || streaming || (!input.trim() && staged.every((s) => s.status !== "ready"))}>
             {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>
@@ -313,9 +397,8 @@ export default function CoachPage() {
   );
 }
 
-function Bubble({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
+function Bubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
-  const text = isUser ? message.content : stripActionTags(message.content);
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -327,19 +410,16 @@ function Bubble({ message, streaming }: { message: ChatMessage; streaming?: bool
           <Bot className="h-3.5 w-3.5 text-white" />
         </div>
       )}
-      <div className={`max-w-[80%] space-y-2`}>
+      <div className="max-w-[80%] space-y-2">
         <div
           className={`whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-            isUser
-              ? "bg-white text-black"
-              : "bg-white/[0.04] text-white/90 border border-white/8"
+            isUser ? "bg-white text-black" : "bg-white/[0.04] text-white/90 border border-white/8"
           }`}
         >
-          {text}
-          {streaming && <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-current/50" />}
+          {isUser ? truncateUserDisplay(message.content) : message.content}
         </div>
         {message.actions && message.actions.length > 0 && (
-          <div className="space-y-1">
+          <div className="flex flex-wrap gap-1.5">
             {message.actions.map((a, i) => (
               <ActionPill key={i} action={a} />
             ))}
@@ -355,18 +435,103 @@ function Bubble({ message, streaming }: { message: ChatMessage; streaming?: bool
   );
 }
 
-function ActionPill({ action }: { action: ActionRecord }) {
-  const isError = action.kind === "error";
+function StreamingBubble({
+  text,
+  working,
+  workingDetail,
+}: {
+  text: string;
+  working: boolean;
+  workingDetail: string;
+}) {
   return (
-    <div
-      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] ${
-        isError
-          ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
-          : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-      }`}
-    >
-      {isError ? <AlertCircle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
-      <span>{action.summary}</span>
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3">
+      <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500">
+        <Bot className="h-3.5 w-3.5 text-white" />
+      </div>
+      <div className="max-w-[80%] space-y-2">
+        {text ? (
+          <div className="whitespace-pre-wrap rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-2.5 text-sm leading-relaxed text-white/90">
+            {text}
+            <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-current/40" />
+          </div>
+        ) : !working ? (
+          <ThinkingPill />
+        ) : null}
+        {working && (
+          <div>
+            <WorkingPill label="Updating your finances" detail={workingDetail} />
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+function AttachmentsRow({ items }: { items: ExtractedFile[] }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end gap-2">
+      <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
+        {items.map((it, i) => (
+          <FileChip key={i} kind={it.kind} name={it.filename} bytes={it.bytes} />
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function FileChip({ kind, name, bytes }: { kind: ExtractedFile["kind"]; name: string; bytes: number }) {
+  const Icon =
+    kind === "xlsx" ? FileSpreadsheet
+    : kind === "pdf" ? FileText
+    : kind === "image" ? ImageIcon
+    : kind === "code" ? CodeIcon
+    : FileText;
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white/80">
+      <Icon className="h-3.5 w-3.5 text-white/50" />
+      <span className="max-w-[12rem] truncate">{name}</span>
+      <span className="text-white/30">{(bytes / 1024).toFixed(1)}kb</span>
+    </div>
+  );
+}
+
+function StagedChip({ staged, onRemove }: { staged: StagedFile; onRemove: () => void }) {
+  if (staged.status === "extracting") {
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-white/60">
+        <Loader2 className="h-3 w-3 animate-spin text-indigo-300" />
+        <span className="max-w-[10rem] truncate">{staged.file.name}</span>
+        <span className="text-white/30">{staged.progress}</span>
+      </div>
+    );
+  }
+  if (staged.status === "error") {
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-xs text-rose-200">
+        <AlertCircle className="h-3 w-3" />
+        <span className="max-w-[10rem] truncate">{staged.file.name}</span>
+        <button onClick={onRemove} className="ml-1 opacity-60 hover:opacity-100">
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
+  const kind = staged.data.kind;
+  const Icon =
+    kind === "xlsx" ? FileSpreadsheet
+    : kind === "pdf" ? FileText
+    : kind === "image" ? ImageIcon
+    : kind === "code" ? CodeIcon
+    : FileText;
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-100">
+      <Icon className="h-3.5 w-3.5" />
+      <span className="max-w-[10rem] truncate">{staged.data.filename}</span>
+      <span className="text-emerald-300/60">{(staged.data.text.length / 1024).toFixed(1)}k chars</span>
+      <button onClick={onRemove} className="ml-1 opacity-60 hover:opacity-100">
+        <X className="h-3 w-3" />
+      </button>
     </div>
   );
 }
@@ -387,7 +552,14 @@ function DownloadProgress({ status }: { status: EngineStatus }) {
   );
 }
 
-function stripActionTags(text: string) {
-  const { cleanedText } = extractActions(text);
-  return cleanedText;
+// Hide attachment prose from the visible user bubble (it's already shown as chips above).
+function truncateUserDisplay(content: string): string {
+  const cut = content.indexOf("\n\n");
+  if (content.startsWith("--- Attachment:") && cut > 0) {
+    // Strip the attachment dump, show just the user's actual question (after blank line).
+    const afterDump = content.lastIndexOf("\n\n");
+    return content.slice(afterDump).trim() || "(attachments)";
+  }
+  return content;
 }
+
