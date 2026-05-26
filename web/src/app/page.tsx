@@ -32,7 +32,6 @@ import {
 import { formatCurrency, monthsToHuman } from "@/lib/format";
 import { StatCard } from "@/components/stat-card";
 import { PageHeader } from "@/components/page-header";
-import { QuickActions } from "@/components/quick-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -82,7 +81,6 @@ export default function DashboardPage() {
           title="Welcome to DebtOS"
           description="The financial operating system for predicting consequences and surviving debt."
         />
-        <QuickActions />
         <Card>
           <CardHeader>
             <CardTitle>Quick start</CardTitle>
@@ -105,8 +103,6 @@ export default function DashboardPage() {
         description="Your real-time financial pulse. Every metric reflects future obligations, not historical spending."
         action={<Badge variant={band}>{stressLabel(band)} · {score}</Badge>}
       />
-
-      <QuickActions />
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
