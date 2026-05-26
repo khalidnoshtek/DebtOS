@@ -34,7 +34,6 @@ export default function StressPage() {
   const { profile, emis, cards } = useStore();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
 
   const hasIncome = profile.monthlySalary > 0;
   const monthlyEmis = totalMonthlyEMIs(emis);
@@ -43,13 +42,13 @@ export default function StressPage() {
   const cardMin = cards.reduce((s, c) => s + c.minDue, 0);
   const hasAnyDebt = debt > 0 || cards.length > 0;
 
-  // Compute income-relative values up front (zero when no income) so the
-  // useMemo below is always called in the same order — React hook rules.
   const emiRatio = hasIncome ? (monthlyEmis / profile.monthlySalary) * 100 : 0;
   const savings = hasIncome
     ? (profile.emergencyFund + profile.currentBalance) / profile.monthlySalary
     : 0;
 
+  // All hooks must run on every render (including the pre-mount render),
+  // so this useMemo lives above the early returns.
   const recommendations = useMemo(() => {
     if (!hasIncome) return [];
     const recs: { title: string; body: string; icon: typeof Target }[] = [];
@@ -88,6 +87,8 @@ export default function StressPage() {
       });
     return recs;
   }, [hasIncome, emiRatio, util, savings, emis, profile.currency]);
+
+  if (!mounted) return null;
 
   // Without income we cannot compute meaningful ratios — only show absolute
   // load, push the user to set their salary, and flag critical exposure.
