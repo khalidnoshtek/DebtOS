@@ -81,7 +81,13 @@ export function extractActions(text: string): { cleanedText: string; raws: strin
     cursor = e;
   }
   cleaned += text.slice(cursor);
-  return { cleanedText: cleaned.replace(/\n{3,}/g, "\n\n").trim(), raws };
+  // Final scrub: any orphan opening / closing action tags or stray fences.
+  cleaned = cleaned
+    .replace(/<\/?action[^>]*>/gi, "")
+    .replace(/```/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { cleanedText: cleaned, raws };
 }
 
 // Strip in-progress / completed JSON from a streaming string so the user
@@ -91,12 +97,11 @@ export function sanitizeStreamingText(text: string): { text: string; working: bo
   let s = text;
   let working = false;
 
-  // Strip completed <action>...</action>
-  s = s.replace(/<action>[\s\S]*?<\/action>/g, "");
+  // Strip completed <action>...</action> (case-insensitive, allow attributes)
+  s = s.replace(/<action[^>]*>[\s\S]*?<\/action>/gi, "");
   // Strip completed ```...```
   s = s.replace(/```[\s\S]*?```/g, "");
-  // Strip completed bare {"kind":...} objects via balanced braces
-  // (cheap heuristic — only if both opening and closing are present)
+  // Strip completed bare {"kind":"..."} objects via balanced braces
   for (const kind of VALID_KINDS) {
     while (true) {
       const idx = s.indexOf(`"kind"`);
@@ -110,24 +115,33 @@ export function sanitizeStreamingText(text: string): { text: string; working: bo
     }
   }
 
-  // Detect & hide an in-progress block at the tail (no closing yet)
-  const openTag = s.lastIndexOf("<action>");
-  if (openTag !== -1 && s.indexOf("</action>", openTag) === -1) {
-    s = s.slice(0, openTag);
+  // In-progress opening tag (no matching closing tag yet)
+  const openTagMatch = /<action[^>]*>[\s\S]*$/i.exec(s);
+  if (openTagMatch && !/<\/action>/i.test(openTagMatch[0])) {
+    s = s.slice(0, openTagMatch.index);
     working = true;
   }
-  const openFence = s.lastIndexOf("```");
-  if (openFence !== -1) {
-    // unmatched fence
-    const after = s.slice(openFence + 3);
-    if (!after.includes("```")) {
-      s = s.slice(0, openFence);
-      working = true;
-    }
+
+  // Partial opening-tag prefix at the very end: <, <a, <ac, ..., <action
+  const partialOpen = s.match(/<(?:a(?:c(?:t(?:i(?:o(?:n)?)?)?)?)?)?$/i);
+  if (partialOpen && typeof partialOpen.index === "number") {
+    s = s.slice(0, partialOpen.index);
+    working = true;
   }
-  const openBrace = s.indexOf(`{`);
+
+  // Orphan closing tags
+  s = s.replace(/<\/action>/gi, "");
+
+  // In-progress code fence
+  const openFence = s.lastIndexOf("```");
+  if (openFence !== -1 && !s.slice(openFence + 3).includes("```")) {
+    s = s.slice(0, openFence);
+    working = true;
+  }
+
+  // Partial bare JSON at tail
+  const openBrace = s.indexOf("{");
   if (openBrace !== -1 && /"kind"\s*:/.test(s.slice(openBrace))) {
-    // partial bare JSON at tail
     s = s.slice(0, openBrace);
     working = true;
   }

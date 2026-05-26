@@ -225,13 +225,17 @@ export default function CoachPage() {
     setStreamingWorking(false);
     setStreamingRawWindow("");
 
+    const parsedSomething = tableResult.parsed.length > 0;
+    const finalLlmContent = parsedSomething
+      ? `${tableResult.parsed.length} entries have already been added to the system. Answer the user's question in plain prose only — do NOT emit any <action> blocks or JSON; just talk normally.\n\nUser: ${llmQuery || "Advise on what was just added."}`
+      : llmQuery;
+
     const llmHistory: ChatMessage[] = [
       ...newRows
         .filter((r): r is { kind: "message"; message: ChatMessage } => r.kind === "message")
         .slice(0, -1)
         .map((r) => r.message),
-      // For the LLM only, replace the raw paste with the trimmed query.
-      { role: "user" as const, content: llmQuery || "Advise on what you just added." },
+      { role: "user" as const, content: finalLlmContent },
     ];
 
     const controller = new AbortController();
