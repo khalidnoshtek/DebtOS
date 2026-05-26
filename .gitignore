@@ -1,0 +1,13 @@
+node_modules/
+.pnpm-store/
+.next/
+out/
+build/
+dist/
+*.log
+.DS_Store
+.env*
+!.env.example
+coverage/
+.vscode/
+.idea/
