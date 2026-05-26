@@ -2,15 +2,32 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, ShieldCheck, TrendingUp, Target, ArrowRight, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ShieldCheck,
+  TrendingUp,
+  Target,
+  ArrowRight,
+  X,
+  Settings,
+} from "lucide-react";
+import Link from "next/link";
 import { useStore } from "@/lib/store";
 import {
-  stressScore, stressBand, stressLabel, stressColor, stressBg,
-  totalMonthlyEMIs, totalCardUtilization, totalDebt, remainingPrincipal,
+  stressScore,
+  stressBand,
+  stressLabel,
+  stressColor,
+  stressBg,
+  totalMonthlyEMIs,
+  totalCardUtilization,
+  totalDebt,
+  remainingPrincipal,
 } from "@/lib/calculations";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 
 export default function StressPage() {
@@ -19,32 +36,144 @@ export default function StressPage() {
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  const score = stressScore(profile, emis, cards);
-  const band = stressBand(score);
-
-  const emiRatio = profile.monthlySalary > 0 ? totalMonthlyEMIs(emis) / profile.monthlySalary * 100 : 0;
+  const hasIncome = profile.monthlySalary > 0;
+  const monthlyEmis = totalMonthlyEMIs(emis);
   const debt = totalDebt(emis, cards);
-  const debtIncomeRatio = profile.monthlySalary > 0 ? (debt / (profile.monthlySalary * 12)) * 100 : 0;
   const util = totalCardUtilization(cards);
-  const savings = profile.monthlySalary > 0 ? ((profile.emergencyFund + profile.currentBalance) / profile.monthlySalary) : 0;
+  const cardMin = cards.reduce((s, c) => s + c.minDue, 0);
+  const hasAnyDebt = debt > 0 || cards.length > 0;
 
-  const drivers = [
-    { label: "EMI / Income ratio", value: formatPercent(emiRatio), pct: Math.min(100, emiRatio * 2), healthy: "< 40%", danger: emiRatio > 50 },
-    { label: "Debt / Annual income", value: formatPercent(debtIncomeRatio), pct: Math.min(100, debtIncomeRatio), healthy: "< 100%", danger: debtIncomeRatio > 100 },
-    { label: "Card utilization", value: formatPercent(util), pct: util, healthy: "< 30%", danger: util > 50 },
-    { label: "Savings (months)", value: `${savings.toFixed(1)} mo`, pct: Math.min(100, savings / 6 * 100), healthy: "6+ months", danger: savings < 3, inverted: true },
-  ];
+  // Compute income-relative values up front (zero when no income) so the
+  // useMemo below is always called in the same order — React hook rules.
+  const emiRatio = hasIncome ? (monthlyEmis / profile.monthlySalary) * 100 : 0;
+  const savings = hasIncome
+    ? (profile.emergencyFund + profile.currentBalance) / profile.monthlySalary
+    : 0;
 
   const recommendations = useMemo(() => {
+    if (!hasIncome) return [];
     const recs: { title: string; body: string; icon: typeof Target }[] = [];
-    if (emiRatio > 50) recs.push({ icon: AlertTriangle, title: "EMI burden exceeds healthy threshold", body: `Your EMIs consume ${emiRatio.toFixed(0)}% of monthly income. Anything above 40% leaves dangerously thin margins. Avoid new EMIs until this drops.` });
-    if (util > 50) recs.push({ icon: AlertTriangle, title: "High credit card utilization", body: `Carrying ${util.toFixed(0)}% utilization signals stress to credit bureaus AND racks up revolving interest. Pay down before the statement closes.` });
-    if (savings < 3) recs.push({ icon: ShieldCheck, title: "Build emergency runway", body: "You have less than 3 months of expenses saved. Aim for 6 months before considering any new EMI." });
-    const highRate = emis.filter(e => e.interestRate > 14 && remainingPrincipal(e) > 0).sort((a, b) => b.interestRate - a.interestRate)[0];
-    if (highRate) recs.push({ icon: TrendingUp, title: `Prioritize ${highRate.name}`, body: `At ${highRate.interestRate}% interest, this is your most expensive debt. Closing it early frees ${formatCurrency(highRate.monthlyAmount, profile.currency)}/mo.` });
-    if (recs.length === 0) recs.push({ icon: ShieldCheck, title: "You're in good shape", body: "Maintain current trajectory. Consider channeling surplus into investments or accelerated debt payoff to compound your runway." });
+    if (emiRatio > 50)
+      recs.push({
+        icon: AlertTriangle,
+        title: "EMI burden exceeds healthy threshold",
+        body: `Your EMIs consume ${emiRatio.toFixed(0)}% of monthly income. Anything above 40% leaves dangerously thin margins. Avoid new EMIs until this drops.`,
+      });
+    if (util > 50)
+      recs.push({
+        icon: AlertTriangle,
+        title: "High credit card utilization",
+        body: `Carrying ${util.toFixed(0)}% utilization signals stress to credit bureaus AND racks up revolving interest. Pay down before the statement closes.`,
+      });
+    if (savings < 3)
+      recs.push({
+        icon: ShieldCheck,
+        title: "Build emergency runway",
+        body: "You have less than 3 months of expenses saved. Aim for 6 months before considering any new EMI.",
+      });
+    const highRate = emis
+      .filter((e) => e.interestRate > 14 && remainingPrincipal(e) > 0)
+      .sort((a, b) => b.interestRate - a.interestRate)[0];
+    if (highRate)
+      recs.push({
+        icon: TrendingUp,
+        title: `Prioritize ${highRate.name}`,
+        body: `At ${highRate.interestRate}% interest, this is your most expensive debt. Closing it early frees ${formatCurrency(highRate.monthlyAmount, profile.currency)}/mo.`,
+      });
+    if (recs.length === 0)
+      recs.push({
+        icon: ShieldCheck,
+        title: "You're in good shape",
+        body: "Maintain current trajectory. Consider channeling surplus into investments or accelerated debt payoff to compound your runway.",
+      });
     return recs;
-  }, [emiRatio, util, savings, emis, profile.currency]);
+  }, [hasIncome, emiRatio, util, savings, emis, profile.currency]);
+
+  // Without income we cannot compute meaningful ratios — only show absolute
+  // load, push the user to set their salary, and flag critical exposure.
+  if (!hasIncome) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <PageHeader
+          title="Financial Stress Engine"
+          description="A composite score reflecting how exposed your finances are to disruption."
+        />
+
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+            <div className="flex-1">
+              <div className="font-medium text-white">Set your monthly salary to compute stress</div>
+              <p className="mt-1 text-sm text-white/70">
+                The stress engine compares your EMIs, debt, and savings to your income. Without a salary it can&apos;t produce a meaningful score.
+              </p>
+              <Link href="/settings">
+                <Button size="sm" className="mt-3">
+                  <Settings className="h-3.5 w-3.5" />
+                  Set salary in Settings
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+
+        <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <AbsoluteCard label="Total debt outstanding" value={formatCurrency(debt, profile.currency)} hint={`${emis.length} EMI${emis.length === 1 ? "" : "s"} + ${cards.length} card${cards.length === 1 ? "" : "s"}`} />
+          <AbsoluteCard label="Monthly EMI burden" value={formatCurrency(monthlyEmis, profile.currency)} hint="across all EMIs" />
+          <AbsoluteCard label="Card min dues" value={formatCurrency(cardMin, profile.currency)} hint={`${formatPercent(util)} avg utilization`} />
+        </section>
+
+        {hasAnyDebt && (
+          <Card className="mt-6 border-rose-500/30 bg-rose-500/5">
+            <CardContent className="flex items-start gap-3 p-5">
+              <AlertTriangle className="mt-0.5 h-5 w-5 text-rose-300" />
+              <div>
+                <div className="font-medium text-white">No income tracked but {formatCurrency(monthlyEmis + cardMin, profile.currency)} of obligations every month</div>
+                <p className="mt-1 text-sm text-white/70">
+                  Once you set your salary, this page will compute EMI ratio, debt-to-income, and savings runway so you can see exactly how exposed you are.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  const score = stressScore(profile, emis, cards);
+  const band = stressBand(score);
+  const debtIncomeRatio = (debt / (profile.monthlySalary * 12)) * 100;
+
+  const drivers = [
+    {
+      label: "EMI / Income ratio",
+      value: formatPercent(emiRatio),
+      pct: Math.min(100, emiRatio * 2),
+      healthy: "< 40%",
+      danger: emiRatio > 50,
+    },
+    {
+      label: "Debt / Annual income",
+      value: formatPercent(debtIncomeRatio),
+      pct: Math.min(100, debtIncomeRatio),
+      healthy: "< 100%",
+      danger: debtIncomeRatio > 100,
+    },
+    {
+      label: "Card utilization",
+      value: formatPercent(util),
+      pct: util,
+      healthy: "< 30%",
+      danger: util > 50,
+    },
+    {
+      label: "Savings (months of income)",
+      value: `${savings.toFixed(1)} mo`,
+      pct: Math.min(100, (savings / 6) * 100),
+      healthy: "6+ months",
+      danger: savings < 3,
+    },
+  ];
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -59,9 +188,23 @@ export default function StressPage() {
             <CardTitle>Stress score</CardTitle>
           </CardHeader>
           <CardContent>
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className={`tabular text-7xl font-semibold ${stressColor(band)}`}>{score}</motion.div>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={`tabular text-7xl font-semibold ${stressColor(band)}`}
+            >
+              {score}
+            </motion.div>
             <div className="mt-1 text-base font-medium text-white capitalize">{stressLabel(band)}</div>
-            <Progress value={score} className="mt-4" barClassName={band === "stable" ? "bg-emerald-400" : band === "warning" ? "bg-amber-400" : band === "dangerous" ? "bg-orange-400" : "bg-rose-500"} />
+            <Progress
+              value={score}
+              className="mt-4"
+              barClassName={
+                band === "stable" ? "bg-emerald-400" :
+                band === "warning" ? "bg-amber-400" :
+                band === "dangerous" ? "bg-orange-400" : "bg-rose-500"
+              }
+            />
             <div className="mt-4 grid grid-cols-4 gap-1 text-[10px]">
               <Zone label="Stable" range="0–29" active={band === "stable"} color="emerald" />
               <Zone label="Warning" range="30–54" active={band === "warning"} color="amber" />
@@ -82,13 +225,20 @@ export default function StressPage() {
                   <div className="text-sm text-white/80">{d.label}</div>
                   <div className={`tabular text-sm ${d.danger ? "text-rose-300" : "text-white"}`}>{d.value}</div>
                 </div>
-                <Progress value={d.pct} className="mt-1.5" barClassName={
-                  d.danger ? "bg-rose-500" : d.pct > 60 ? "bg-amber-400" : "bg-emerald-400"
-                } />
+                <Progress
+                  value={d.pct}
+                  className="mt-1.5"
+                  barClassName={d.danger ? "bg-rose-500" : d.pct > 60 ? "bg-amber-400" : "bg-emerald-400"}
+                />
                 <div className="mt-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-white/40">
                   <span>healthy</span>
                   <span className="text-white/60">{d.healthy}</span>
-                  {d.danger && <><X className="h-3 w-3 text-rose-400" /><span className="text-rose-300">over threshold</span></>}
+                  {d.danger && (
+                    <>
+                      <X className="h-3 w-3 text-rose-400" />
+                      <span className="text-rose-300">over threshold</span>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -105,7 +255,9 @@ export default function StressPage() {
               <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
                 <Card>
                   <CardContent className="flex items-start gap-3 p-5">
-                    <div className="rounded-lg bg-white/5 p-2"><Icon className="h-4 w-4 text-white/70" /></div>
+                    <div className="rounded-lg bg-white/5 p-2">
+                      <Icon className="h-4 w-4 text-white/70" />
+                    </div>
                     <div>
                       <div className="text-sm font-medium text-white">{r.title}</div>
                       <div className="mt-1 text-xs text-white/60">{r.body}</div>
@@ -118,6 +270,16 @@ export default function StressPage() {
           })}
         </div>
       </section>
+    </div>
+  );
+}
+
+function AbsoluteCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-5">
+      <div className="text-[11px] uppercase tracking-wider text-white/50">{label}</div>
+      <div className="tabular mt-2 text-2xl font-semibold text-white">{value}</div>
+      <div className="mt-1 text-xs text-white/40">{hint}</div>
     </div>
   );
 }
