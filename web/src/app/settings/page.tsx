@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Save, Sparkles, RotateCcw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Save,
+  Sparkles,
+  RotateCcw,
+  Download,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 import { useStore } from "@/lib/store";
+import { exportToFile, importFromFile, type ImportResult } from "@/lib/io";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,6 +24,8 @@ export default function SettingsPage() {
   const [mounted, setMounted] = useState(false);
   const [form, setForm] = useState(profile);
   const [saved, setSaved] = useState(false);
+  const [importStatus, setImportStatus] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setMounted(true), []);
   useEffect(() => setForm(profile), [profile]);
@@ -25,6 +36,22 @@ export default function SettingsPage() {
     updateProfile(form);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const mode = confirm(
+      "Click OK to REPLACE all current data with the backup.\n\nClick Cancel to MERGE (keeps your existing data, adds anything new from the backup).",
+    )
+      ? "replace"
+      : "merge";
+    const result = await importFromFile(file, mode);
+    setImportStatus(result);
+    if (result.ok) {
+      setTimeout(() => setImportStatus(null), 8000);
+    }
   };
 
   return (
@@ -76,6 +103,64 @@ export default function SettingsPage() {
               {saved ? "Saved" : "Save"}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Backup & restore</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-white/60">
+            Export your data as a JSON file. Import it on another device — useful for moving from the desktop site to the Android app, or just for backups.
+          </p>
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={exportToFile}>
+              <Download className="h-4 w-4" />
+              Export to JSON
+            </Button>
+            <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-4 w-4" />
+              Import from JSON
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImport}
+            />
+          </div>
+
+          {importStatus && (
+            <div
+              className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${
+                importStatus.ok
+                  ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-100"
+                  : "border-rose-500/30 bg-rose-500/5 text-rose-100"
+              }`}
+            >
+              {importStatus.ok ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
+              )}
+              <div>
+                {importStatus.ok ? (
+                  <>
+                    Imported {importStatus.counts.emis} EMI{importStatus.counts.emis === 1 ? "" : "s"},{" "}
+                    {importStatus.counts.cards} card{importStatus.counts.cards === 1 ? "" : "s"},{" "}
+                    {importStatus.counts.bills} bill{importStatus.counts.bills === 1 ? "" : "s"}
+                    {importStatus.counts.chat > 0 && `, ${importStatus.counts.chat} chat row${importStatus.counts.chat === 1 ? "" : "s"}`}
+                    .
+                  </>
+                ) : (
+                  importStatus.error
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
