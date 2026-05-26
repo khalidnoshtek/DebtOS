@@ -29,8 +29,13 @@ export default function CardsPage() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CardT | null>(null);
-
   useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new")) {
+      setEditing(null);
+      setOpen(true);
+    }
+  }, []);
   if (!mounted) return null;
 
   const totalLimit = cards.reduce((s, c) => s + c.limit, 0);
@@ -205,7 +210,7 @@ function CardDialog({
           <Field label="Credit limit"><Input type="number" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} required /></Field>
           <Field label="Current balance"><Input type="number" inputMode="decimal" value={balance} onChange={(e) => setBalance(e.target.value)} required /></Field>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Field label="Min due"><Input type="number" inputMode="decimal" value={minDue} onChange={(e) => setMinDue(e.target.value)} /></Field>
           <Field label="Statement day"><Input type="number" min="1" max="28" value={statementDate} onChange={(e) => setStatementDate(e.target.value)} /></Field>
           <Field label="Due day"><Input type="number" min="1" max="28" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>

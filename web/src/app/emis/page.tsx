@@ -33,8 +33,13 @@ export default function EMIsPage() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<EMI | null>(null);
-
   useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new")) {
+      setEditing(null);
+      setOpen(true);
+    }
+  }, []);
 
   const sorted = useMemo(
     () => [...emis].sort((a, b) => emiEndDate(b).getTime() - emiEndDate(a).getTime()),
@@ -255,7 +260,7 @@ function EMIDialog({
           </Field>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Field label="Monthly EMI (₹)">
             <Input type="number" inputMode="decimal" value={monthly} onChange={(e) => setMonthly(e.target.value)} required />
           </Field>
@@ -276,7 +281,7 @@ function EMIDialog({
         </button>
 
         {showAdvanced && (
-          <div className="grid grid-cols-3 gap-3 rounded-xl border border-white/8 bg-white/[0.02] p-3">
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-white/8 bg-white/[0.02] p-3 sm:grid-cols-3">
             <Field label="Interest rate (% p.a.)">
               <Input type="number" inputMode="decimal" step="0.1" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0 = no-cost" />
             </Field>

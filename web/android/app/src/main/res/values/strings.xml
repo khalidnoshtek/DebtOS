@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DebtOS</string>
+    <string name="title_activity_main">DebtOS</string>
+    <string name="package_name">com.noshtek.debtos</string>
+    <string name="custom_url_scheme">com.noshtek.debtos</string>
+</resources>

@@ -32,6 +32,7 @@ import {
 import { formatCurrency, monthsToHuman } from "@/lib/format";
 import { StatCard } from "@/components/stat-card";
 import { PageHeader } from "@/components/page-header";
+import { QuickActions } from "@/components/quick-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,7 @@ import {
 } from "recharts";
 
 export default function DashboardPage() {
-  const { profile, emis, cards, bills, seedDemo } = useStore();
+  const { profile, emis, cards, bills } = useStore();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -79,30 +80,20 @@ export default function DashboardPage() {
       <div className="mx-auto max-w-4xl">
         <PageHeader
           title="Welcome to DebtOS"
-          description="The financial operating system for predicting consequences and surviving debt. Start by adding your salary, EMIs, and credit cards."
+          description="The financial operating system for predicting consequences and surviving debt."
         />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Quick start</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-white/70">
-              <p>1. Set your monthly salary in <Link href="/settings" className="text-white underline-offset-2 hover:underline">Settings</Link></p>
-              <p>2. Add your EMIs in <Link href="/emis" className="text-white underline-offset-2 hover:underline">EMIs</Link></p>
-              <p>3. Track your credit cards in <Link href="/cards" className="text-white underline-offset-2 hover:underline">Cards</Link></p>
-              <p>4. See the future on your <Link href="/forecast" className="text-white underline-offset-2 hover:underline">Forecast</Link></p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Or try it instantly</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-white/60">Load a realistic demo to see how DebtOS visualizes EMI stacking, stress scoring, and cashflow forecasting.</p>
-              <Button className="mt-4" onClick={seedDemo}>Load demo data</Button>
-            </CardContent>
-          </Card>
-        </div>
+        <QuickActions />
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick start</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-white/70">
+            <p>1. Set your monthly salary in <Link href="/settings" className="text-white underline-offset-2 hover:underline">Settings</Link></p>
+            <p>2. Add your EMIs, bills, or credit cards using the buttons above</p>
+            <p>3. Already have a backup? <Link href="/settings" className="text-white underline-offset-2 hover:underline">Import it</Link></p>
+            <p>4. See the future on your <Link href="/forecast" className="text-white underline-offset-2 hover:underline">Forecast</Link></p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -114,6 +105,8 @@ export default function DashboardPage() {
         description="Your real-time financial pulse. Every metric reflects future obligations, not historical spending."
         action={<Badge variant={band}>{stressLabel(band)} · {score}</Badge>}
       />
+
+      <QuickActions />
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard

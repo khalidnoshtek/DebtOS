@@ -66,7 +66,7 @@ export default function SettingsPage() {
           <CardTitle>Profile</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Monthly salary">
               <Input type="number" inputMode="decimal" value={form.monthlySalary} onChange={(e) => setForm({ ...form, monthlySalary: Number(e.target.value) || 0 })} />
             </Field>
@@ -74,7 +74,7 @@ export default function SettingsPage() {
               <Input type="number" min="1" max="28" value={form.salaryDay} onChange={(e) => setForm({ ...form, salaryDay: Number(e.target.value) || 1 })} />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Current bank balance">
               <Input type="number" inputMode="decimal" value={form.currentBalance} onChange={(e) => setForm({ ...form, currentBalance: Number(e.target.value) || 0 })} />
             </Field>
@@ -82,7 +82,7 @@ export default function SettingsPage() {
               <Input type="number" inputMode="decimal" value={form.emergencyFund} onChange={(e) => setForm({ ...form, emergencyFund: Number(e.target.value) || 0 })} />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Monthly variable spend">
               <Input type="number" inputMode="decimal" value={form.monthlyVariableSpend} onChange={(e) => setForm({ ...form, monthlyVariableSpend: Number(e.target.value) || 0 })} />
               <div className="mt-1 text-[10px] text-white/40">Avg discretionary: dining, shopping, fuel, etc.</div>

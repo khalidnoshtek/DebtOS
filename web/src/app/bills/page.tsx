@@ -31,8 +31,13 @@ export default function BillsPage() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Bill | null>(null);
-
   useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new")) {
+      setEditing(null);
+      setOpen(true);
+    }
+  }, []);
   if (!mounted) return null;
 
   const total = totalMonthlyBills(bills);
@@ -150,7 +155,7 @@ function BillDialog({
     <Dialog open={open} onClose={onClose} title={editing ? "Edit bill" : "Add bill"}>
       <form onSubmit={submit} className="space-y-3">
         <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rent, Netflix" required /></Field>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Field label="Amount"><Input type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required /></Field>
           <Field label="Due day"><Input type="number" min="1" max="28" value={day} onChange={(e) => setDay(e.target.value)} /></Field>
           <Field label="Category">
