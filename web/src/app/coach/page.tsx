@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot,
@@ -37,6 +37,7 @@ import {
   extractFile,
   type ExtractedFile,
 } from "@/lib/coach/file-extract";
+import { parseAndAddEmisFromText } from "@/lib/coach/table-parser";
 import type { ActionRecord, ChatMessage, EngineStatus } from "@/lib/coach/types";
 import { WorkingPill, ThinkingPill } from "@/components/coach/working-pill";
 import { ActionPill } from "@/components/coach/action-pill";
@@ -53,9 +54,13 @@ type ChatRow =
   | { kind: "attachments"; items: ExtractedFile[] };
 
 type StagedFile =
-  | { status: "extracting"; file: File; progress: string }
-  | { status: "ready"; data: ExtractedFile }
-  | { status: "error"; file: File; error: string };
+  | { id: string; status: "extracting"; file: File; progress: string }
+  | { id: string; status: "ready"; data: ExtractedFile }
+  | { id: string; status: "error"; file: File; error: string };
+
+function newStagedId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export default function CoachPage() {
   const [mounted, setMounted] = useState(false);
@@ -101,48 +106,49 @@ export default function CoachPage() {
     } catch { /* error shown via status */ }
   };
 
-  const onFilesSelected = async (files: FileList | null) => {
+  const onFilesSelected = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const arr = Array.from(files);
-    const startIdx = staged.length;
-    setStaged((prev) => [
-      ...prev,
-      ...arr.map<StagedFile>((f) => ({ status: "extracting", file: f, progress: "Reading…" })),
-    ]);
-    for (let i = 0; i < arr.length; i++) {
-      const file = arr[i];
+    const items = Array.from(files).map<StagedFile>((f) => ({
+      id: newStagedId(),
+      status: "extracting",
+      file: f,
+      progress: "Reading…",
+    }));
+    setStaged((prev) => [...prev, ...items]);
+    for (const item of items) {
+      if (item.status !== "extracting") continue;
       try {
-        const data = await extractFile(file, (msg) => {
-          setStaged((prev) => {
-            const copy = [...prev];
-            const idx = startIdx + i;
-            if (copy[idx]?.status === "extracting") {
-              copy[idx] = { status: "extracting", file, progress: msg };
-            }
-            return copy;
-          });
+        const data = await extractFile(item.file, (msg) => {
+          setStaged((prev) =>
+            prev.map((s) =>
+              s.id === item.id && s.status === "extracting"
+                ? { ...s, progress: msg }
+                : s,
+            ),
+          );
         });
-        setStaged((prev) => {
-          const copy = [...prev];
-          copy[startIdx + i] = { status: "ready", data };
-          return copy;
-        });
+        setStaged((prev) =>
+          prev.map((s) => (s.id === item.id ? { id: s.id, status: "ready", data } : s)),
+        );
       } catch (err) {
-        setStaged((prev) => {
-          const copy = [...prev];
-          copy[startIdx + i] = {
-            status: "error",
-            file,
-            error: err instanceof Error ? err.message : String(err),
-          };
-          return copy;
-        });
+        setStaged((prev) =>
+          prev.map((s) =>
+            s.id === item.id
+              ? {
+                  id: s.id,
+                  status: "error",
+                  file: item.file,
+                  error: err instanceof Error ? err.message : String(err),
+                }
+              : s,
+          ),
+        );
       }
     }
-  };
+  }, []);
 
-  const removeStaged = (idx: number) =>
-    setStaged((prev) => prev.filter((_, i) => i !== idx));
+  const removeStaged = (id: string) =>
+    setStaged((prev) => prev.filter((s) => s.id !== id));
 
   const handleSubmit = async (eOrText: FormEvent | string) => {
     const inputText = typeof eOrText === "string" ? eOrText : input.trim();
@@ -162,30 +168,78 @@ export default function CoachPage() {
       if (getStatus().state !== "ready") return;
     }
 
-    const promptBody = attachmentsToPrompt(readyAttachments) + (inputText || "Process the attached files: extract every entry (EMI, card, bill, profile field) and add it.");
-    const userMessage: ChatMessage = { role: "user", content: promptBody };
+    const attachmentText = attachmentsToPrompt(readyAttachments);
+    const fullInput = attachmentText + (inputText || "");
+    const userMessage: ChatMessage = {
+      role: "user",
+      content: fullInput || "(attached files)",
+    };
 
     const newRows: ChatRow[] = [...rows];
     if (readyAttachments.length) newRows.push({ kind: "attachments", items: readyAttachments });
     newRows.push({ kind: "message", message: userMessage });
-    setRows(newRows);
     setInput("");
     setStaged([]);
+
+    // -----------------------------------------------------------------
+    // Step 1: deterministic table parsing (fast, reliable, no LLM).
+    // Catches markdown tables and CSV-from-Excel. Adds EMIs directly.
+    // -----------------------------------------------------------------
+    const tableResult = parseAndAddEmisFromText(fullInput);
+    if (tableResult.parsed.length > 0) {
+      const summaryLines: string[] = [];
+      summaryLines.push(
+        `Parsed ${tableResult.parsed.length} EMI${tableResult.parsed.length === 1 ? "" : "s"} from the table.`,
+      );
+      if (tableResult.rowsSkipped > 0) {
+        summaryLines.push(
+          `${tableResult.rowsSkipped} row${tableResult.rowsSkipped === 1 ? "" : "s"} skipped (incomplete data).`,
+        );
+      }
+      newRows.push({
+        kind: "message",
+        message: {
+          role: "assistant",
+          content: summaryLines.join(" "),
+          actions: tableResult.parsed,
+        },
+      });
+    }
+
+    setRows(newRows);
+
+    // -----------------------------------------------------------------
+    // Step 2: if the user typed a question alongside the table (or had
+    // no parseable table at all), send the remaining query to the LLM
+    // so it can give advice grounded in the now-current state.
+    // -----------------------------------------------------------------
+    const llmQuery = (tableResult.parsed.length > 0 ? tableResult.remainingText : fullInput).trim();
+    const shouldCallLlm =
+      tableResult.parsed.length === 0
+        ? fullInput.length > 0
+        : llmQuery.length >= 8;
+    if (!shouldCallLlm) return;
+
     setStreaming(true);
     setStreamingText("");
     setStreamingWorking(false);
     setStreamingRawWindow("");
 
-    const history = newRows
-      .filter((r): r is { kind: "message"; message: ChatMessage } => r.kind === "message")
-      .map((r) => r.message);
+    const llmHistory: ChatMessage[] = [
+      ...newRows
+        .filter((r): r is { kind: "message"; message: ChatMessage } => r.kind === "message")
+        .slice(0, -1)
+        .map((r) => r.message),
+      // For the LLM only, replace the raw paste with the trimmed query.
+      { role: "user" as const, content: llmQuery || "Advise on what you just added." },
+    ];
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     let liveText = "";
     const result = await streamChat(
-      history,
+      llmHistory,
       {
         onToken: (d) => {
           liveText += d;
@@ -208,12 +262,40 @@ export default function CoachPage() {
       ? { role: "assistant", content: `⚠️ ${result.error}` }
       : {
           role: "assistant",
-          content: result.assistantText || "(empty response — try rephrasing)",
+          content: result.assistantText || "(no answer — try rephrasing)",
           actions: result.actions,
         };
 
     setRows((prev) => [...prev, { kind: "message", message: finalMessage }]);
   };
+
+  // Image paste: when the user pastes a screenshot, treat it as a file upload.
+  useEffect(() => {
+    if (!mounted) return;
+    const handler = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+      const imageFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.kind === "file" && it.type.startsWith("image/")) {
+          const f = it.getAsFile();
+          if (f) imageFiles.push(f);
+        }
+      }
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      const dt = new DataTransfer();
+      imageFiles.forEach((f) => dt.items.add(f));
+      onFilesSelected(dt.files);
+    };
+    document.addEventListener("paste", handler);
+    return () => document.removeEventListener("paste", handler);
+  // onFilesSelected closes over staged.length; safe to leave out since it only
+  // affects the index of the NEW chip and we never reorder. Re-attaching every
+  // render would also work but adds noise.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
 
   if (!mounted) return null;
 
@@ -347,8 +429,8 @@ export default function CoachPage() {
       <form onSubmit={handleSubmit} className="sticky bottom-0 bg-zinc-950/40 pt-2 backdrop-blur-xl">
         {staged.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {staged.map((s, i) => (
-              <StagedChip key={i} staged={s} onRemove={() => removeStaged(i)} />
+            {staged.map((s) => (
+              <StagedChip key={s.id} staged={s} onRemove={() => removeStaged(s.id)} />
             ))}
           </div>
         )}
