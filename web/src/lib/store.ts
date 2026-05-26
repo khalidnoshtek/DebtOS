@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { emiAmount } from "./calculations";
 import type { Bill, CreditCard, EMI, Profile } from "./types";
+import type { CoachRow } from "./coach/types";
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -14,6 +15,7 @@ type State = {
   emis: EMI[];
   cards: CreditCard[];
   bills: Bill[];
+  coachRows: CoachRow[];
   hydrated: boolean;
 };
 
@@ -28,6 +30,8 @@ type Actions = {
   addBill: (input: Omit<Bill, "id" | "createdAt">) => void;
   updateBill: (id: string, patch: Partial<Bill>) => void;
   removeBill: (id: string) => void;
+  setCoachRows: (rowsOrFn: CoachRow[] | ((prev: CoachRow[]) => CoachRow[])) => void;
+  clearCoachRows: () => void;
   seedDemo: () => void;
   resetAll: () => void;
 };
@@ -48,6 +52,7 @@ export const useStore = create<State & Actions>()(
       emis: [],
       cards: [],
       bills: [],
+      coachRows: [],
       hydrated: false,
 
       updateProfile: (patch) =>
@@ -81,6 +86,13 @@ export const useStore = create<State & Actions>()(
       updateBill: (id, patch) =>
         set((s) => ({ bills: s.bills.map((b) => (b.id === id ? { ...b, ...patch } : b)) })),
       removeBill: (id) => set((s) => ({ bills: s.bills.filter((b) => b.id !== id) })),
+
+      setCoachRows: (rowsOrFn) =>
+        set((s) => ({
+          coachRows:
+            typeof rowsOrFn === "function" ? rowsOrFn(s.coachRows) : rowsOrFn,
+        })),
+      clearCoachRows: () => set({ coachRows: [] }),
 
       seedDemo: () => {
         const now = new Date();
@@ -173,6 +185,7 @@ export const useStore = create<State & Actions>()(
           emis: [],
           cards: [],
           bills: [],
+          coachRows: [],
         }),
     }),
     {

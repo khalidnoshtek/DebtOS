@@ -38,7 +38,13 @@ import {
   type ExtractedFile,
 } from "@/lib/coach/file-extract";
 import { parseAndAddEmisFromText } from "@/lib/coach/table-parser";
-import type { ActionRecord, ChatMessage, EngineStatus } from "@/lib/coach/types";
+import type {
+  AttachmentChip,
+  ChatMessage,
+  CoachRow,
+  EngineStatus,
+} from "@/lib/coach/types";
+import { useStore } from "@/lib/store";
 import { WorkingPill, ThinkingPill } from "@/components/coach/working-pill";
 import { ActionPill } from "@/components/coach/action-pill";
 
@@ -48,10 +54,6 @@ const SUGGESTED_PROMPTS = [
   "My salary is 1.2L per month",
   "Which EMI should I close first to save the most interest?",
 ];
-
-type ChatRow =
-  | { kind: "message"; message: ChatMessage }
-  | { kind: "attachments"; items: ExtractedFile[] };
 
 type StagedFile =
   | { id: string; status: "extracting"; file: File; progress: string }
@@ -67,7 +69,9 @@ export default function CoachPage() {
   const [hasGPU, setHasGPU] = useState<boolean | null>(null);
   const [cached, setCached] = useState<boolean | null>(null);
   const [status, setStatus] = useState<EngineStatus>(getStatus());
-  const [rows, setRows] = useState<ChatRow[]>([]);
+  const coachRows = useStore((s) => s.coachRows);
+  const setCoachRows = useStore((s) => s.setCoachRows);
+  const clearCoachRows = useStore((s) => s.clearCoachRows);
   const [input, setInput] = useState("");
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -95,7 +99,7 @@ export default function CoachPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [rows, streamingText, streamingWorking]);
+  }, [coachRows, streamingText, streamingWorking]);
 
   const ready = status.state === "ready";
   const downloading = status.state === "downloading" || status.state === "checking";
@@ -170,13 +174,23 @@ export default function CoachPage() {
 
     const attachmentText = attachmentsToPrompt(readyAttachments);
     const fullInput = attachmentText + (inputText || "");
+    // Don't persist the attachment dump to localStorage — it can be huge and
+    // we render only the file chips, not the dump. Persist just the user
+    // query (or a stub if there's none).
     const userMessage: ChatMessage = {
       role: "user",
-      content: fullInput || "(attached files)",
+      content: inputText || (readyAttachments.length ? "(attached files)" : ""),
     };
 
-    const newRows: ChatRow[] = [...rows];
-    if (readyAttachments.length) newRows.push({ kind: "attachments", items: readyAttachments });
+    const newRows: CoachRow[] = [...coachRows];
+    if (readyAttachments.length) {
+      const chips: AttachmentChip[] = readyAttachments.map((a) => ({
+        filename: a.filename,
+        kind: a.kind,
+        bytes: a.bytes,
+      }));
+      newRows.push({ kind: "attachments", items: chips });
+    }
     newRows.push({ kind: "message", message: userMessage });
     setInput("");
     setStaged([]);
@@ -206,7 +220,7 @@ export default function CoachPage() {
       });
     }
 
-    setRows(newRows);
+    setCoachRows(newRows);
 
     // -----------------------------------------------------------------
     // Step 2: if the user typed a question alongside the table (or had
@@ -270,7 +284,7 @@ export default function CoachPage() {
           actions: result.actions,
         };
 
-    setRows((prev) => [...prev, { kind: "message", message: finalMessage }]);
+    setCoachRows((prev) => [...prev, { kind: "message", message: finalMessage }]);
   };
 
   // Image paste: when the user pastes a screenshot, treat it as a file upload.
@@ -322,7 +336,7 @@ export default function CoachPage() {
     );
   }
 
-  if (!ready && rows.length === 0 && cached === false) {
+  if (!ready && coachRows.length === 0 && cached === false) {
     return (
       <div className="mx-auto max-w-3xl">
         <PageHeader
@@ -379,8 +393,8 @@ export default function CoachPage() {
         title="DebtOS Coach"
         description={ready ? `Running locally · ${DEFAULT_MODEL}` : "Loading model…"}
         action={
-          rows.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => setRows([])}>
+          coachRows.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => clearCoachRows()}>
               <XCircle className="h-3.5 w-3.5" />
               Clear
             </Button>
@@ -391,7 +405,7 @@ export default function CoachPage() {
       {downloading && <DownloadProgress status={status} />}
 
       <div className="flex-1 space-y-3 overflow-y-auto pb-4">
-        {rows.length === 0 && ready && (
+        {coachRows.length === 0 && ready && (
           <div className="space-y-2 py-8 text-center">
             <Bot className="mx-auto h-8 w-8 text-white/30" />
             <p className="text-sm text-white/50">Ask anything, paste a table, or attach a file.</p>
@@ -410,7 +424,7 @@ export default function CoachPage() {
         )}
 
         <AnimatePresence initial={false}>
-          {rows.map((row, i) =>
+          {coachRows.map((row, i) =>
             row.kind === "message" ? (
               <Bubble key={i} message={row.message} />
             ) : (
@@ -554,7 +568,7 @@ function StreamingBubble({
   );
 }
 
-function AttachmentsRow({ items }: { items: ExtractedFile[] }) {
+function AttachmentsRow({ items }: { items: AttachmentChip[] }) {
   return (
     <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end gap-2">
       <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
@@ -566,7 +580,7 @@ function AttachmentsRow({ items }: { items: ExtractedFile[] }) {
   );
 }
 
-function FileChip({ kind, name, bytes }: { kind: ExtractedFile["kind"]; name: string; bytes: number }) {
+function FileChip({ kind, name, bytes }: { kind: AttachmentChip["kind"]; name: string; bytes: number }) {
   const Icon =
     kind === "xlsx" ? FileSpreadsheet
     : kind === "pdf" ? FileText

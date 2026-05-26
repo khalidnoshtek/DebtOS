@@ -147,7 +147,7 @@ export default function EMIsPage() {
         editing={editing}
         onSubmit={(values) => {
           if (editing) {
-            updateEMI(editing.id, { ...values, monthlyAmount: emiAmount(values.principal, values.interestRate, values.tenureMonths) });
+            updateEMI(editing.id, values);
           } else {
             addEMI(values);
           }
@@ -176,80 +176,134 @@ function EMIDialog({
   open: boolean;
   onClose: () => void;
   editing: EMI | null;
-  onSubmit: (values: Omit<EMI, "id" | "createdAt" | "monthlyAmount">) => void;
+  onSubmit: (values: Omit<EMI, "id" | "createdAt">) => void;
 }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState<EMI["category"]>("personal");
-  const [principal, setPrincipal] = useState("");
-  const [rate, setRate] = useState("");
+  const [monthly, setMonthly] = useState("");
   const [tenure, setTenure] = useState("");
   const [paid, setPaid] = useState("0");
+  const [rate, setRate] = useState("");
+  const [principal, setPrincipal] = useState("");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (editing) {
       setName(editing.name);
       setCategory(editing.category);
-      setPrincipal(String(editing.principal));
-      setRate(String(editing.interestRate));
+      setMonthly(String(Math.round(editing.monthlyAmount)));
       setTenure(String(editing.tenureMonths));
       setPaid(String(editing.monthsPaid));
+      setRate(editing.interestRate ? String(editing.interestRate) : "");
+      setPrincipal(String(Math.round(editing.principal)));
       setStartDate(editing.startDate.slice(0, 10));
+      setShowAdvanced(editing.interestRate > 0 || !!editing.principal);
     } else {
-      setName(""); setCategory("personal"); setPrincipal(""); setRate(""); setTenure(""); setPaid("0");
+      setName(""); setCategory("personal"); setMonthly(""); setTenure(""); setPaid("0");
+      setRate(""); setPrincipal("");
       setStartDate(new Date().toISOString().slice(0, 10));
+      setShowAdvanced(false);
     }
   }, [editing, open]);
 
-  const principalN = Number(principal) || 0;
-  const rateN = Number(rate) || 0;
+  const monthlyN = Number(monthly) || 0;
   const tenureN = Number(tenure) || 0;
-  const monthly = principalN > 0 && tenureN > 0 ? emiAmount(principalN, rateN, tenureN) : 0;
+  const paidN = Number(paid) || 0;
+  const rateN = Number(rate) || 0;
+  const principalN = Number(principal) || 0;
+
+  // Derived principal: if user supplied one, use it. Otherwise reverse-amortize
+  // from the monthly EMI; if no rate, fall back to monthly × tenure.
+  const derivedPrincipal = principalN > 0
+    ? principalN
+    : monthlyN > 0 && tenureN > 0
+      ? (rateN > 0 ? reverseAmortize(monthlyN, rateN, tenureN) : monthlyN * tenureN)
+      : 0;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || principalN <= 0 || tenureN <= 0) return;
+    if (!name || monthlyN <= 0 || tenureN <= 0) return;
     onSubmit({
       name,
       category,
-      principal: principalN,
+      principal: derivedPrincipal,
       interestRate: rateN,
       tenureMonths: tenureN,
-      monthsPaid: Number(paid) || 0,
+      monthsPaid: paidN,
+      monthlyAmount: monthlyN,
       startDate: new Date(startDate).toISOString(),
     });
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title={editing ? "Edit EMI" : "Add EMI"} description="Loan details to track remaining tenure and interest.">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={editing ? "Edit EMI" : "Add EMI"}
+      description="Just the monthly EMI and tenure are required. Interest rate is optional."
+    >
       <form onSubmit={submit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. HDFC Home Loan" required /></Field>
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. HDFC Home Loan" required />
+          </Field>
           <Field label="Category">
             <Select value={category} onChange={(e) => setCategory(e.target.value as EMI["category"])}>
-              {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </Select>
           </Field>
         </div>
+
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Principal"><Input type="number" inputMode="decimal" value={principal} onChange={(e) => setPrincipal(e.target.value)} required /></Field>
-          <Field label="Rate (% p.a.)"><Input type="number" inputMode="decimal" step="0.1" value={rate} onChange={(e) => setRate(e.target.value)} required /></Field>
-          <Field label="Tenure (months)"><Input type="number" inputMode="numeric" value={tenure} onChange={(e) => setTenure(e.target.value)} required /></Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Months paid"><Input type="number" inputMode="numeric" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
-          <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+          <Field label="Monthly EMI (₹)">
+            <Input type="number" inputMode="decimal" value={monthly} onChange={(e) => setMonthly(e.target.value)} required />
+          </Field>
+          <Field label="Tenure (months)">
+            <Input type="number" inputMode="numeric" value={tenure} onChange={(e) => setTenure(e.target.value)} required />
+          </Field>
+          <Field label="Months paid">
+            <Input type="number" inputMode="numeric" value={paid} onChange={(e) => setPaid(e.target.value)} />
+          </Field>
         </div>
 
-        {monthly > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="text-xs text-white/50 underline-offset-2 hover:text-white hover:underline"
+        >
+          {showAdvanced ? "Hide" : "Show"} advanced (interest rate, principal, start date)
+        </button>
+
+        {showAdvanced && (
+          <div className="grid grid-cols-3 gap-3 rounded-xl border border-white/8 bg-white/[0.02] p-3">
+            <Field label="Interest rate (% p.a.)">
+              <Input type="number" inputMode="decimal" step="0.1" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0 = no-cost" />
+            </Field>
+            <Field label="Principal (override)">
+              <Input
+                type="number"
+                inputMode="decimal"
+                value={principal}
+                onChange={(e) => setPrincipal(e.target.value)}
+                placeholder={monthlyN && tenureN ? String(Math.round(derivedPrincipal)) : "auto"}
+              />
+            </Field>
+            <Field label="Start date">
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </Field>
+          </div>
+        )}
+
+        {monthlyN > 0 && tenureN > 0 && (
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-white/60">Calculated monthly EMI</span>
-              <span className="tabular font-semibold text-white">{formatCurrency(monthly)}</span>
+              <span className="text-white/60">Estimated principal</span>
+              <span className="tabular text-white">{formatCurrency(derivedPrincipal)}</span>
             </div>
             <div className="mt-1 flex items-center justify-between text-xs">
-              <span className="text-white/40">Total interest over tenure</span>
-              <span className="tabular text-white/70">{formatCurrency(monthly * tenureN - principalN)}</span>
+              <span className="text-white/40">Total you&apos;ll pay over {tenureN - paidN} more months</span>
+              <span className="tabular text-white/70">{formatCurrency(monthlyN * (tenureN - paidN))}</span>
             </div>
           </div>
         )}
@@ -261,6 +315,14 @@ function EMIDialog({
       </form>
     </Dialog>
   );
+}
+
+function reverseAmortize(monthly: number, annualRate: number, tenureMonths: number): number {
+  if (tenureMonths <= 0) return 0;
+  if (annualRate === 0) return monthly * tenureMonths;
+  const r = annualRate / 12 / 100;
+  const pow = Math.pow(1 + r, tenureMonths);
+  return (monthly * (pow - 1)) / (r * pow);
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
