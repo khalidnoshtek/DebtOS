@@ -5,6 +5,8 @@ const repo = "DebtOS";
 
 const nextConfig: NextConfig = {
   output: "export",
+  // @debtos/core ships TypeScript source; Next must transpile the workspace pkg.
+  transpilePackages: ["@debtos/core"],
   trailingSlash: true,
   images: { unoptimized: true },
   basePath: isGhPages ? `/${repo}` : "",

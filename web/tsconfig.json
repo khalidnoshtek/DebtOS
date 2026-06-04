@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@debtos/core": ["../packages/core/src/index.ts"],
+      "@debtos/core/coach-types": ["../packages/core/src/coach-types.ts"]
     }
   },
   "include": [
