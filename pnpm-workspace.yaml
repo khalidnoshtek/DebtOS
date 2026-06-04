@@ -1,0 +1,9 @@
+packages:
+  - web
+  - mobile
+  - packages/*
+
+# carried over from the former web/pnpm-workspace.yaml
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
