@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { Screen } from "@/components/ui/Screen";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
@@ -15,6 +16,7 @@ export default function SettingsScreen() {
   const { profile, updateProfile, seedDemo, resetAll } = useStore();
   const [form, setForm] = useState(profile);
   const [saved, setSaved] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const numField = (k: keyof Profile) => (t: string) => setForm({ ...form, [k]: Number(t) || 0 });
 
@@ -44,8 +46,10 @@ export default function SettingsScreen() {
     const res = await importBackup(mode);
     if (res.ok) {
       setForm(useStore.getState().profile);
-      Alert.alert("Imported", `${res.counts.emis} EMIs · ${res.counts.cards} cards · ${res.counts.bills} bills.`);
+      setImportMsg(`Imported ${res.counts.emis} EMIs · ${res.counts.cards} cards · ${res.counts.bills} bills`);
+      setTimeout(() => setImportMsg(null), 6000);
     } else if (!("cancelled" in res)) {
+      setImportMsg(null);
       Alert.alert("Import failed", res.error);
     }
   };
@@ -79,6 +83,12 @@ export default function SettingsScreen() {
         <Text style={styles.muted}>Export a JSON backup or import one. Compatible with the DebtOS web app.</Text>
         <Button title="Export backup" variant="secondary" onPress={doExport} style={{ marginTop: spacing.sm }} />
         <Button title="Import backup" variant="secondary" onPress={doImport} />
+        {importMsg ? (
+          <View style={styles.successBanner}>
+            <Feather name="check-circle" size={16} color={colors.positive} />
+            <Text style={styles.successText}>{importMsg}</Text>
+          </View>
+        ) : null}
       </Card>
 
       <Card>
@@ -98,4 +108,16 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: spacing.md },
   col: { flex: 1 },
   version: { color: colors.textFaint, fontSize: 12, textAlign: "center", marginTop: spacing.md },
+  successBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 12,
+    backgroundColor: "rgba(52,211,153,0.10)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(52,211,153,0.30)",
+  },
+  successText: { color: colors.positive, fontSize: 13, fontWeight: "600", flex: 1 },
 });
