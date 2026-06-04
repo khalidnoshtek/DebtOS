@@ -1,8 +1,14 @@
 import { Tabs } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/theme/tokens";
 
 export default function TabLayout() {
+  // Reserve space for the Android gesture/navigation area (edge-to-edge) so the
+  // tab icons/labels don't overlap the system nav buttons.
+  const insets = useSafeAreaInsets();
+  const barHeight = 58 + insets.bottom;
+
   return (
     <Tabs
       screenOptions={{
@@ -11,7 +17,11 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
+          height: barHeight,
+          paddingBottom: insets.bottom + 4,
+          paddingTop: 6,
         },
+        tabBarLabelStyle: { fontSize: 11 },
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
         headerShadowVisible: false,
