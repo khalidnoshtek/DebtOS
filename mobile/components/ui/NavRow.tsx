@@ -1,4 +1,4 @@
-import { Link } from "expo-router";
+import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, radius, spacing } from "@/theme/tokens";
@@ -15,19 +15,21 @@ export function NavRow({
   title: string;
   subtitle?: string;
 }) {
+  const router = useRouter();
   return (
-    <Link href={href as never} asChild>
-      <Pressable style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
-        <View style={styles.iconWrap}>
-          <Feather name={icon} size={20} color={colors.accent} />
-        </View>
-        <View style={styles.text}>
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-        </View>
-        <Feather name="chevron-right" size={20} color={colors.textFaint} />
-      </Pressable>
-    </Link>
+    <Pressable
+      onPress={() => router.push(href as never)}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+    >
+      <View style={styles.iconWrap}>
+        <Feather name={icon} size={20} color={colors.accent} />
+      </View>
+      <View style={styles.text}>
+        <Text style={styles.title}>{title}</Text>
+        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      </View>
+      <Feather name="chevron-right" size={20} color={colors.textFaint} />
+    </Pressable>
   );
 }
 

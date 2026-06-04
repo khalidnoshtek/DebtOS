@@ -22,9 +22,9 @@ export default function TabLayout() {
           paddingTop: 6,
         },
         tabBarLabelStyle: { fontSize: 11 },
-        headerStyle: { backgroundColor: colors.background },
-        headerTintColor: colors.text,
-        headerShadowVisible: false,
+        // Each tab screen draws its own title (consistent with Home); no nav
+        // header, which also avoids a duplicate title + redundant top inset.
+        headerShown: false,
       }}
     >
       <Tabs.Screen
