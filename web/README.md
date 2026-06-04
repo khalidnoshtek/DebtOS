@@ -62,3 +62,42 @@ Because the data layer is `localStorage`-backed Zustand, the same store works in
 - Supabase backend + auth — UI is store-agnostic.
 - SMS parsing, bank sync, notifications — depends on native shell.
 - Gamification (streaks, milestones, debt-free countdown) — calculations already exist; UI surface to come.
+
+## Native Android (Capacitor)
+
+The Next.js static export (`out/`) is wrapped by a Capacitor Android shell (`android/`, appId `com.noshtek.debtos`). The WebView loads the exact same bundle the E2E suite tests.
+
+```bash
+# Requires a JDK (Android Studio's bundled JBR works) and the Android SDK.
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+
+pnpm run android:apk     # next build → cap sync android → gradlew assembleDebug
+# APK at: android/app/build/outputs/apk/debug/app-debug.apk
+
+# Run on a booted emulator / device:
+"$ANDROID_HOME/platform-tools/adb" install -r android/app/build/outputs/apk/debug/app-debug.apk
+"$ANDROID_HOME/platform-tools/adb" shell monkey -p com.noshtek.debtos -c android.intent.category.LAUNCHER 1
+```
+
+## E2E tests
+
+Playwright drives the production static export on a Pixel-class viewport — the same assets the native WebView serves.
+
+```bash
+pnpm build            # produce out/
+pnpm run test:e2e     # 13 tests: route smoke (all 9 routes) + functional flows
+```
+
+`e2e/smoke.spec.ts` asserts every route hydrates without runtime errors; `e2e/flows.spec.ts` covers demo-data seeding, localStorage persistence across reload, the settings → dashboard flow, and the stress engine.
+
+## Release — Firebase App Distribution
+
+Project: **DebtOS** (`debtos-xdrkz`), Android app `1:962645156475:android:1feed0a086071b6664f8de`.
+
+```bash
+firebase appdistribution:distribute android/app/build/outputs/apk/debug/app-debug.apk \
+  --app "1:962645156475:android:1feed0a086071b6664f8de" \
+  --release-notes "..." \
+  --testers "tester@example.com"
+```
